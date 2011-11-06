@@ -47,8 +47,9 @@ type Size    = Word
 -- [@NoBlock@] Send operation should be performed in non-blocking mode.
 -- If it cannot be performed immediatley an error will be thrown (errno
 -- is set to EAGAIN).
-data Flag = NoBlock -- ^ ZMQ_NOBLOCK
-          | SndMore -- ^ ZMQ_SNDMORE
+data Flag = DontWait -- ^ ZMQ_DONTWAIT
+          | SndMore  -- ^ ZMQ_SNDMORE
+          | SndLabel -- ^ ZMQ_SNDLABEL
   deriving (Eq, Ord, Show)
 
 -- | A 0MQ context representation.
@@ -144,8 +145,9 @@ getStrOpt sock (ZMQOption o) = onSocket "getStrOpt" sock $ \s ->
         peek sPtr >>= \len -> peekCStringLen (bPtr, fromIntegral len)
 
 toZMQFlag :: Flag -> ZMQFlag
-toZMQFlag NoBlock = noBlock
+toZMQFlag DontWait = dontWait
 toZMQFlag SndMore = sndMore
+toZMQFlag SndLabel = sndLabel
 
 combine :: [Flag] -> CInt
 combine = fromIntegral . foldr ((.|.) . flagVal . toZMQFlag) 0

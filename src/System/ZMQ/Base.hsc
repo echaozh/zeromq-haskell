@@ -22,8 +22,8 @@ newtype ZMQMsg = ZMQMsg { content :: Ptr () }
 instance Storable ZMQMsg where
     alignment _        = #{alignment zmq_msg_t}
     sizeOf    _        = #{size zmq_msg_t}
-    peek p             = ZMQMsg <$> #{peek zmq_msg_t, content} p
-    poke p (ZMQMsg c)  = #{poke zmq_msg_t, content} p c
+    peek p             = ZMQMsg <$> #{peek zmq_msg_t, _} p
+    poke p (ZMQMsg c)  = #{poke zmq_msg_t, _} p c
 
 data ZMQPoll = ZMQPoll
     { pSocket  :: ZMQSocket
@@ -67,27 +67,26 @@ newtype ZMQSocketType = ZMQSocketType { typeVal :: CInt } deriving (Eq, Ord)
     xrequest   = ZMQ_XREQ,
     xresponse  = ZMQ_XREP,
     pull       = ZMQ_PULL,
-    push       = ZMQ_PUSH,
-    upstream   = ZMQ_UPSTREAM,
-    downstream = ZMQ_DOWNSTREAM
+    push       = ZMQ_PUSH
 }
 
 newtype ZMQOption = ZMQOption { optVal :: CInt } deriving (Eq, Ord)
 
 #{enum ZMQOption, ZMQOption,
-    highWM          = ZMQ_HWM,
-    swap            = ZMQ_SWAP,
+    sendHighWM      = ZMQ_SNDHWM,
+    receiveHighWM   = ZMQ_RCVHWM,
+    sendTimeout     = ZMQ_SNDTIMEO,
+    receiveTimeout  = ZMQ_RCVTIMEO,
     affinity        = ZMQ_AFFINITY,
     identity        = ZMQ_IDENTITY,
     subscribe       = ZMQ_SUBSCRIBE,
     unsubscribe     = ZMQ_UNSUBSCRIBE,
     rate            = ZMQ_RATE,
     recoveryIVL     = ZMQ_RECOVERY_IVL,
-    recoveryIVLMsec = ZMQ_RECOVERY_IVL_MSEC,
-    mcastLoop       = ZMQ_MCAST_LOOP,
     sendBuf         = ZMQ_SNDBUF,
     receiveBuf      = ZMQ_RCVBUF,
     receiveMore     = ZMQ_RCVMORE,
+    labeledMessage  = ZMQ_RCVLABEL,
     filedesc        = ZMQ_FD,
     events          = ZMQ_EVENTS,
     linger          = ZMQ_LINGER,
@@ -98,8 +97,9 @@ newtype ZMQOption = ZMQOption { optVal :: CInt } deriving (Eq, Ord)
 newtype ZMQFlag = ZMQFlag { flagVal :: CInt } deriving (Eq, Ord)
 
 #{enum ZMQFlag, ZMQFlag,
-    noBlock = ZMQ_NOBLOCK
-  , sndMore = ZMQ_SNDMORE
+    dontWait = ZMQ_DONTWAIT
+  , sndMore  = ZMQ_SNDMORE
+  , sndLabel = ZMQ_SNDLABEL
 }
 
 newtype ZMQPollEvent = ZMQPollEvent { pollVal :: CShort } deriving (Eq, Ord)
@@ -109,14 +109,6 @@ newtype ZMQPollEvent = ZMQPollEvent { pollVal :: CShort } deriving (Eq, Ord)
     pollOut   = ZMQ_POLLOUT,
     pollerr   = ZMQ_POLLERR,
     pollInOut = ZMQ_POLLIN | ZMQ_POLLOUT
-}
-
-newtype ZMQDevice = ZMQDevice { deviceType :: CInt } deriving (Eq, Ord)
-
-#{enum ZMQDevice, ZMQDevice,
-    deviceStreamer  = ZMQ_STREAMER,
-    deviceForwarder = ZMQ_FORWARDER,
-    deviceQueue     = ZMQ_QUEUE
 }
 
 -- general initialization
@@ -172,22 +164,16 @@ foreign import ccall unsafe "zmq.h zmq_bind"
 foreign import ccall unsafe "zmq.h zmq_connect"
     c_zmq_connect :: ZMQSocket -> CString -> IO CInt
 
-foreign import ccall unsafe "zmq.h zmq_send"
+foreign import ccall unsafe "zmq.h zmq_sendmsg"
     c_zmq_send :: ZMQSocket -> ZMQMsgPtr -> CInt -> IO CInt
 
-foreign import ccall safe "zmq.h zmq_recv"
+foreign import ccall safe "zmq.h zmq_recvmsg"
     c_zmq_recv :: ZMQSocket -> ZMQMsgPtr -> CInt -> IO CInt
 
-foreign import ccall unsafe "zmq.h zmq_recv"
+foreign import ccall unsafe "zmq.h zmq_recvmsg"
     c_zmq_recv_unsafe :: ZMQSocket -> ZMQMsgPtr -> CInt -> IO CInt
 
 -- poll
 
 foreign import ccall safe "zmq.h zmq_poll"
     c_zmq_poll :: ZMQPollPtr -> CInt -> CLong -> IO CInt
-
--- device
-
-foreign import ccall safe "zmq.h zmq_device"
-    c_zmq_device :: CInt -> ZMQSocket -> ZMQSocket -> IO CInt
-

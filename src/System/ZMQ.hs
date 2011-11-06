@@ -22,7 +22,6 @@ module System.ZMQ (
     Poll(..),
     Timeout,
     PollEvent(..),
-    Device(..),
 
     SType,
     SubsType,
@@ -35,8 +34,6 @@ module System.ZMQ (
     XRep(..),
     Pull(..),
     Push(..),
-    Up(..),
-    Down(..),
 
     withContext,
     withSocket,
@@ -50,8 +47,8 @@ module System.ZMQ (
     send',
     receive,
     moreToReceive,
+    messageLabeled,
     poll,
-    device,
 
     -- * Low-level functions
     init,
@@ -166,22 +163,6 @@ data Push = Push
 instance SType Push where
     zmqSocketType = const push
 
-{-# DEPRECATED Up "Use Pull instead." #-}
--- | Socket to receive messages from up the stream. Messages are
--- fair-queued from among all the connected peers. Send function is not
--- implemented for this socket type. /Compatible peer sockets/: 'Down'.
-data Up = Up
-instance SType Up where
-    zmqSocketType = const upstream
-
-{-# DEPRECATED Down "Use Push instead." #-}
--- | Socket to send messages down stream. Messages are load-balanced
--- among all the connected peers. Send function is not implemented for
--- this socket type. /Compatible peer sockets/: 'Up'.
-data Down = Down
-instance SType Down where
-    zmqSocketType = const downstream
-
 -- Subscribable:
 
 class SubsType a
@@ -254,13 +235,14 @@ instance SubsType Sub
 --     /Default/: 0
 --
 data SocketOption =
-    HighWM          Word64 -- ^ ZMQ_HWM
-  | Swap            Int64  -- ^ ZMQ_SWAP
+    SendHighWM      Word64 -- ^ ZMQ_SNDHWM
+  | ReceiveHighWM   Word64 -- ^ ZMQ_RCVHWM
+  | SendTimeout     Int64  -- ^ ZMQ_SNDTIMEO
+  | ReceiveTimeout  Int64  -- ^ ZMQ_RCVTIMEO
   | Affinity        Word64 -- ^ ZMQ_AFFINITY
   | Identity        String -- ^ ZMQ_IDENTITY
   | Rate            Int64  -- ^ ZMQ_RATE
   | RecoveryIVL     Int64  -- ^ ZMQ_RECOVERY_IVL
-  | RecoveryIVLMsec Int64  -- ^ ZMQ_RECOVERY_IVL_MSEC
   | McastLoop       Int64  -- ^ ZMQ_MCAST_LOOP
   | SendBuf         Word64 -- ^ ZMQ_SNDBUF
   | ReceiveBuf      Word64 -- ^ ZMQ_RCVBUF
@@ -286,13 +268,6 @@ data PollEvent =
 data Poll =
     forall a. S (Socket a) PollEvent
   | F Fd PollEvent
-
--- | Type representing ZeroMQ devices, as used with zmq_device
-data Device =
-    Streamer  -- ^ ZMQ_STREAMER
-  | Forwarder -- ^ ZMQ_FORWARDER
-  | Queue     -- ^ ZMQ_QUEUE
-  deriving (Eq, Ord, Show)
 
 -- | Initialize a 0MQ context (cf. zmq_init for details).  You should
 -- normally prefer to use 'with' instead.
@@ -347,14 +322,14 @@ close sock@(Socket _ status) = onSocket "close" sock $ \s -> do
 -- Please note that subscribe/unsubscribe is handled with separate
 -- functions.
 setOption :: Socket a -> SocketOption -> IO ()
-setOption s (HighWM o)          = setIntOpt s highWM o
-setOption s (Swap o)            = setIntOpt s swap o
+setOption s (SendHighWM o)      = setIntOpt s sendHighWM o
+setOption s (ReceiveHighWM o)   = setIntOpt s receiveHighWM o
+setOption s (SendTimeout o)     = setIntOpt s sendTimeout o
+setOption s (ReceiveTimeout o)  = setIntOpt s receiveTimeout o
 setOption s (Affinity o)        = setIntOpt s affinity o
 setOption s (Identity o)        = setStrOpt s identity o
 setOption s (Rate o)            = setIntOpt s rate o
 setOption s (RecoveryIVL o)     = setIntOpt s recoveryIVL o
-setOption s (RecoveryIVLMsec o) = setIntOpt s recoveryIVLMsec o
-setOption s (McastLoop o)       = setIntOpt s mcastLoop o
 setOption s (SendBuf o)         = setIntOpt s sendBuf o
 setOption s (ReceiveBuf o)      = setIntOpt s receiveBuf o
 setOption s (FD o)              = setIntOpt s filedesc o
@@ -368,14 +343,14 @@ setOption s (Backlog o)         = setIntOpt s backlog o
 -- there are certain combatibility constraints w.r.t the socket
 -- type (cf. man zmq_setsockopt).
 getOption :: Socket a -> SocketOption -> IO SocketOption
-getOption s (HighWM _)          = HighWM <$> getIntOpt s highWM
-getOption s (Swap _)            = Swap <$> getIntOpt s swap
+getOption s (SendHighWM _)      = SendHighWM <$> getIntOpt s sendHighWM
+getOption s (ReceiveHighWM _)   = ReceiveHighWM <$> getIntOpt s receiveHighWM
+getOption s (SendTimeout _)     = SendTimeout <$> getIntOpt s sendTimeout
+getOption s (ReceiveTimeout _)  = ReceiveTimeout <$> getIntOpt s receiveTimeout
 getOption s (Affinity _)        = Affinity <$> getIntOpt s affinity
 getOption s (Identity _)        = Identity <$> getStrOpt s identity
 getOption s (Rate _)            = Rate <$> getIntOpt s rate
 getOption s (RecoveryIVL _)     = RecoveryIVL <$> getIntOpt s recoveryIVL
-getOption s (RecoveryIVLMsec _) = RecoveryIVLMsec <$> getIntOpt s recoveryIVLMsec
-getOption s (McastLoop _)       = McastLoop <$> getIntOpt s mcastLoop
 getOption s (SendBuf _)         = SendBuf <$> getIntOpt s sendBuf
 getOption s (ReceiveBuf _)      = ReceiveBuf <$> getIntOpt s receiveBuf
 getOption s (FD _)              = FD <$> getIntOpt s filedesc
@@ -396,7 +371,10 @@ unsubscribe s = setStrOpt s B.unsubscribe
 -- message currently being read has more parts to follow, otherwise
 -- False.
 moreToReceive :: Socket a -> IO Bool
-moreToReceive s = getBoolOpt s receiveMore
+moreToReceive s = (&&) <$> getBoolOpt s receiveMore <*> messageLabeled s
+
+messageLabeled :: Socket a -> IO Bool
+messageLabeled s = getBoolOpt s labeledMessage
 
 -- | Bind the socket to the given address (zmq_bind)
 bind :: Socket a -> String -> IO ()
@@ -413,7 +391,7 @@ send :: Socket a -> SB.ByteString -> [Flag] -> IO ()
 send sock val fls = bracket (messageOf val) messageClose $ \m ->
   onSocket "send" sock $ \s ->
     retry "send" (waitWrite sock) $
-          c_zmq_send s (msgPtr m) (combine (NoBlock : fls))
+          c_zmq_send s (msgPtr m) (combine (DontWait : fls))
 
 -- | Send the given 'LB.ByteString' over the socket (zmq_send).
 --   This is operationally identical to @send socket (Strict.concat
@@ -422,14 +400,14 @@ send' :: Socket a -> LB.ByteString -> [Flag] -> IO ()
 send' sock val fls = bracket (messageOfLazy val) messageClose $ \m ->
   onSocket "send'" sock $ \s ->
     retry "send'" (waitWrite sock) $
-          c_zmq_send s (msgPtr m) (combine (NoBlock : fls))
+          c_zmq_send s (msgPtr m) (combine (DontWait : fls))
 
 -- | Receive a 'ByteString' from socket (zmq_recv).
 receive :: Socket a -> [Flag] -> IO (SB.ByteString)
 receive sock fls = bracket messageInit messageClose $ \m ->
   onSocket "receive" sock $ \s -> do
     retry "receive" (waitRead sock) $
-          c_zmq_recv_unsafe s (msgPtr m) (combine (NoBlock : fls))
+          c_zmq_recv_unsafe s (msgPtr m) (combine (DontWait : fls))
     data_ptr <- c_zmq_msg_data (msgPtr m)
     size     <- c_zmq_msg_size (msgPtr m)
     SB.packCStringLen (data_ptr, fromIntegral size)
@@ -487,19 +465,3 @@ wait' w f s = do (FD fd) <- getOption s (FD undefined)
 waitRead, waitWrite :: Socket a -> IO ()
 waitRead = wait' threadWaitRead pollIn
 waitWrite = wait' threadWaitWrite pollOut
-
--- | Launch a ZeroMQ device (zmq_device).
---
--- Please note that this call never returns.
-device :: Device -> Socket a -> Socket b -> IO ()
-device device' insock outsock =
-  onSocket "device" insock $ \insocket ->
-  onSocket "device" outsock $ \outsocket ->
-    throwErrnoIfMinus1Retry_ "device" $
-        c_zmq_device (fromDevice device') insocket outsocket
- where
-    fromDevice :: Device -> CInt
-    fromDevice Streamer  = fromIntegral . deviceType $ deviceStreamer
-    fromDevice Forwarder = fromIntegral . deviceType $ deviceForwarder
-    fromDevice Queue     = fromIntegral . deviceType $ deviceQueue
-
