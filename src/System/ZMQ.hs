@@ -216,14 +216,6 @@ instance SubsType Sub
 --     recovery interval at 1Gb/s rate (requires 7GB in-memory buffer).
 --     /Default/: 10
 --
---     [@McastLoop@] This  option  applies only to multicast transports
---     (pgm & udp). Value of 1 means that the mutlicast packets can be
---     received on the box they were sent from. Setting the value to 0
---     disables the loopback functionality which can have negative impact on
---     the performance. If possible, disable the loopback in production
---     environments.
---     /Default/: 1
---
 --     [@SendBuf@] Sets the underlying kernel transmit buffer size to the
 --     specified size. See SO_SNDBUF POSIX socket option. Value of zero
 --     means leaving the OS default unchanged.
@@ -243,7 +235,6 @@ data SocketOption =
   | Identity        String -- ^ ZMQ_IDENTITY
   | Rate            Int64  -- ^ ZMQ_RATE
   | RecoveryIVL     Int64  -- ^ ZMQ_RECOVERY_IVL
-  | McastLoop       Int64  -- ^ ZMQ_MCAST_LOOP
   | SendBuf         Word64 -- ^ ZMQ_SNDBUF
   | ReceiveBuf      Word64 -- ^ ZMQ_RCVBUF
   | FD              CInt   -- ^ ZMQ_FD
